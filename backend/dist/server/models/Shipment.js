@@ -1,0 +1,42 @@
+import mongoose, { Schema } from "mongoose";
+const ShipmentSchema = new Schema({
+    _id: { type: String, required: true },
+    description: { type: String, required: true },
+    shipper: { type: String, required: true },
+    consignee: { type: String, required: true },
+    origin: { type: String, required: true },
+    destination: { type: String, required: true },
+    carrier: { type: String, required: true },
+    type: { type: String, default: "sea" },
+    status: { type: String, default: "inquiry_received" },
+    mawb: { type: String },
+    hawb: { type: String },
+    bl_number: { type: String },
+    container_number: { type: String },
+    vessel_id: { type: String },
+    payload: { type: String, required: true },
+    weight: { type: Number, default: 0 },
+    cbm: { type: Number, default: 0 },
+    eta: { type: String },
+    etd: { type: String },
+    customs_status: { type: String, default: "pending" },
+    notes: { type: String, default: "" },
+    created_by: { type: String },
+    job_number: { type: String },
+    commodity: { type: String, default: "" },
+    gross_weight: { type: Number, default: 0 },
+    container_details: { type: String, default: "" },
+    incoterm: { type: String, default: "" },
+    shipping_line: { type: String, default: "" },
+    vessel_name: { type: String, default: "" },
+    voyage: { type: String, default: "" },
+    assigned_employee: { type: String, default: "" },
+    notify_party: { type: String, default: "" },
+    consignee_details: { type: String, default: "" },
+    stage_timestamps: { type: Schema.Types.Mixed, default: {} },
+    customer_id: { type: String, ref: "Customer" },
+}, { timestamps: { createdAt: "created_at", updatedAt: "updated_at" }, _id: false });
+ShipmentSchema.index({ status: 1 });
+ShipmentSchema.index({ shipper: 1 });
+ShipmentSchema.index({ carrier: 1 });
+export const ShipmentModel = mongoose.model("Shipment", ShipmentSchema);

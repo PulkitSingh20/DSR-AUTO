@@ -1,8 +1,191 @@
 // ─── DSR Routes ──────────────────────────────────────────────────────────────
 import { Router } from "express";
 import { logyMailService, getAuditLogs } from "../services/logyMailService.js";
+import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
 
 export const dsrRoutes = Router();
+
+// ─── CSV Parser & Loader ──────────────────────────────────────────────────────
+
+function findLatestCsv(): string | null {
+  const possibleDirs = [
+    "D:\\Downloads",
+    "C:\\Users\\pulki\\Downloads",
+    path.resolve(process.cwd(), "../../"), 
+    path.resolve(process.cwd(), "../"),
+    path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../../"), 
+    path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../../../"), 
+  ];
+
+  let latestFile: string | null = null;
+  let latestTime = 0;
+
+  for (const dir of possibleDirs) {
+    try {
+      if (fs.existsSync(dir)) {
+        const files = fs.readdirSync(dir);
+        for (const file of files) {
+          if (file.startsWith("ZIPAWORLD-") && file.endsWith(".csv")) {
+            const filePath = path.join(dir, file);
+            const stats = fs.statSync(filePath);
+            if (stats.mtimeMs > latestTime) {
+              latestTime = stats.mtimeMs;
+              latestFile = filePath;
+            }
+          }
+        }
+      }
+    } catch (err) {
+      // ignore
+    }
+  }
+
+  return latestFile;
+}
+
+function parseCSV(csvContent: string): string[][] {
+  const result: string[][] = [];
+  let currentVal = "";
+  let currentRow: string[] = [];
+  let inQuotes = false;
+
+  for (let i = 0; i < csvContent.length; i++) {
+    const char = csvContent[i];
+    
+    if (char === '"') {
+      inQuotes = !inQuotes;
+    } else if (char === ',' && !inQuotes) {
+      currentRow.push(currentVal.trim());
+      currentVal = "";
+    } else if ((char === '\n' || char === '\r') && !inQuotes) {
+      if (char === '\n') {
+        currentRow.push(currentVal.trim());
+        if (currentRow.length > 0 && (currentRow.length > 1 || currentRow[0] !== "")) {
+          result.push(currentRow);
+        }
+        currentRow = [];
+        currentVal = "";
+      }
+    } else {
+      currentVal += char;
+    }
+  }
+  
+  if (currentVal || currentRow.length > 0) {
+    currentRow.push(currentVal.trim());
+    if (currentRow.length > 0 && (currentRow.length > 1 || currentRow[0] !== "")) {
+      result.push(currentRow);
+    }
+  }
+
+  return result;
+}
+
+function loadCsvData(): any[] {
+  const csvPath = findLatestCsv();
+  if (!csvPath) {
+    console.log("DSR Loader: No ZIPAWORLD CSV found in download paths.");
+    return [];
+  }
+
+  console.log(`DSR Loader: Loading sheet data from ${csvPath}`);
+  try {
+    const content = fs.readFileSync(csvPath, "utf-8");
+    const rows = parseCSV(content);
+    if (rows.length < 2) return [];
+
+    const headers = rows[0];
+    const parsedRecords = [];
+
+    for (let i = 1; i < rows.length; i++) {
+      const values = rows[i];
+      const row: any = {};
+      headers.forEach((header, index) => {
+        row[header] = values[index] || "";
+      });
+      parsedRecords.push(row);
+    }
+
+    return parsedRecords.map((row, index) => {
+      const id = row.id || `csv_${index}`;
+      const buyRateVal = parseFloat(row.buyRate) || 0;
+      const rateVal = parseFloat(row.rate) || 0;
+      const margin = rateVal - buyRateVal;
+      const currency = row.currency || "USD";
+
+      // Convert to INR to align with the rest of dummy data
+      const formatINR = (valUSD: number) => {
+        const inr = valUSD * 83; // approximate rate
+        return Math.round(inr).toLocaleString("en-IN");
+      };
+
+      const cleanPort = (portStr: string) => {
+        if (!portStr) return "";
+        const parts = portStr.split(",");
+        if (parts.length > 1) return parts[1].trim();
+        return portStr.trim();
+      };
+
+      const origin = cleanPort(row.originName);
+      const destination = cleanPort(row.destinationName);
+      const validityStart = row.validityStartDate || new Date().toISOString().split("T")[0];
+      const validityEnd = row.validityEndDate || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
+
+      return {
+        _id: `dsr_csv_${id}`,
+        handledBy: row.branchName || "ZIPAWORLD OPERATIONS",
+        zipaRefNo: `ZIP-AO-${id.slice(-4).toUpperCase()}`,
+        billingParty: row.branchName || "ZIPAWORLD INNOVATION PVT LTD",
+        shipperName: `Client - ${row.region || "Global"}`,
+        cneeName: "Consignee Logistics Ltd",
+        remarks: row.additionalRemarks || row.groupNameRemarks || "Rate sheet entry loaded.",
+        shipmentStatus: row.isSpotRate === "true" || row.isSpotRate === true ? "IN TRANSIT" : "PENDING",
+        incoterms: row.rateType === "OI" ? "CIF" : "FOB",
+        shipperInvNoAndDate: `INV-${id.slice(-4).toUpperCase()} - ${validityStart}`,
+        sbNoAndDate: `SB-${id.slice(-4).toUpperCase()} - ${validityStart}`,
+        portOfReceipt: origin,
+        portOfLoading: origin,
+        portOfDischarge: destination,
+        finalDestination: destination,
+        commodity: row.cargoType || "General Cargo",
+        lclFcl: row.shipmentMode || "FCL",
+        twentyFoot: row.containerName?.includes("20") ? "1" : "0",
+        fortyFoot: row.containerName?.includes("40") ? "1" : "0",
+        grossWeight: "14,500 kg",
+        noOfPkgs: "24 Pallets",
+        volume: row.containerName?.includes("20") ? "33 CBM" : "67 CBM",
+        shippingLineCoLoader: row.shippingLineName || "TBD",
+        linerInvoiceCoLoader: `L-INV-${id.slice(0, 4).toUpperCase()}`,
+        vesselNameVoyage: `Vessel ${(row.shippingLineName || "Express").split(" ")[0]} Voyage ${id.slice(-3).toUpperCase()}`,
+        croNoAndReleaseDt: `CRO-${id.slice(0, 4).toUpperCase()} - ${validityStart}`,
+        hblNumber: `HBL-ZIP-${id.slice(-4).toUpperCase()}`,
+        mblNumber: row.contractNo || `MBL-ZIP-${id.slice(-5).toUpperCase()}`,
+        hblOblTlxExp: "Original",
+        mblOblSwbTlx: "Seaway Bill",
+        railingTruckingDt: validityStart,
+        stuffingDate: validityStart,
+        cntrGatedIn: validityStart,
+        vslBerthDt: validityStart,
+        etd: validityStart,
+        eta: validityEnd,
+        sellRateInr: formatINR(rateVal),
+        buyRateInr: formatINR(buyRateVal),
+        marginInr: formatINR(margin),
+        invoiceReleasedDt: validityStart,
+        billingWeek: `W${Math.ceil(new Date(validityStart).getDate() / 7)}`,
+        billingMonth: new Date(validityStart).toLocaleString("default", { month: "long" }),
+        containerNo: `ZAWU${Math.floor(1000000 + Math.random() * 9000000)}`,
+        salesPerson: "System Loader",
+        createdAt: new Date().toISOString(),
+      };
+    });
+  } catch (err) {
+    console.error("DSR Loader: Failed to read CSV", err);
+    return [];
+  }
+}
 
 // ─── In-memory Ocean DSR store ────────────────────────────────────────────────
 // Exported so logyMailService can access and mutate records directly.
@@ -102,6 +285,17 @@ export const oceanDsr: any[] = [
     createdAt: new Date().toISOString(),
   },
 ];
+
+// Load CSV sheet data on startup
+try {
+  const csvRecords = loadCsvData();
+  if (csvRecords && csvRecords.length > 0) {
+    oceanDsr.push(...csvRecords);
+    console.log(`DSR Loader: Successfully integrated ${csvRecords.length} records from CSV.`);
+  }
+} catch (e) {
+  console.error("Failed to load CSV dummy data on startup:", e);
+}
 
 // Attach the store to the Logy Mail service
 logyMailService.attachDsrStore(oceanDsr);

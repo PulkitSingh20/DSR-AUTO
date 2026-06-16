@@ -809,7 +809,7 @@ export function OceanDSRSheet() {
       </header>
 
       {/* Main Table Card */}
-      <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden min-h-[600px] flex flex-col">
+      <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden h-[calc(100vh-240px)] min-h-[500px] flex flex-col">
         {/* Table Toolbar */}
         <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
           <div className="flex items-center gap-4 flex-1">
@@ -843,7 +843,7 @@ export function OceanDSRSheet() {
         </div>
 
         {/* Table */}
-        <div className="overflow-x-auto flex-1">
+        <div className="overflow-auto flex-1">
           <table className="w-full text-left border-collapse min-w-[3000px]">
             <thead className="sticky top-0 bg-slate-50/80 backdrop-blur-md z-10">
               <tr className="border-b border-slate-100 italic">

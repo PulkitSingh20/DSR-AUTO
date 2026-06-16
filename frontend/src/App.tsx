@@ -14,6 +14,7 @@ import { CustomerManagement } from "./components/CustomerManagement";
 import { SettingsManagement } from "./components/SettingsManagement";
 import { ShipmentDetails } from "./components/ShipmentDetails";
 import { DatabaseAdmin } from "./components/DatabaseAdmin";
+import { BillingManagement } from "./components/BillingManagement";
 import { Filter, SortAsc, Search, Bell, HelpCircle, ArrowLeft, Menu } from "lucide-react";
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
@@ -271,6 +272,8 @@ export default function App() {
 
               {view === "dsr" && <OceanDSRSheet />}
 
+              {view === "billing" && <BillingManagement />}
+
               {view === "analytics" && (
                 <div className="p-6 lg:p-10 w-full space-y-12">
                   <header className="mb-8 flex items-center gap-4">
@@ -300,7 +303,7 @@ export default function App() {
               )}
 
               {/* Other views placeholder */}
-              {view !== "dashboard" && view !== "reminders" && view !== "shipments" && view !== "documents" && view !== "settings" && view !== "support" && view !== "analytics" && view !== "new-shipment" && view !== "db-admin" && view !== "shipment-details" && view !== "dsr" && (
+              {view !== "dashboard" && view !== "reminders" && view !== "shipments" && view !== "documents" && view !== "settings" && view !== "support" && view !== "analytics" && view !== "new-shipment" && view !== "db-admin" && view !== "shipment-details" && view !== "dsr" && view !== "billing" && (
                 <div className="p-20 text-center text-secondary">
                   <p className="text-lg italic">{view.toUpperCase()} module coming soon...</p>
                   <button

@@ -12,7 +12,8 @@ import {
   Sun,
   Moon,
   Database,
-  Table
+  Table,
+  CreditCard
 } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { motion, AnimatePresence } from "motion/react";
@@ -33,6 +34,7 @@ const navItems = [
   { id: "dsr",        icon: Table,           label: "Ocean DSR" },
   { id: "documents",  icon: Files,           label: "Documents" },
   { id: "reminders",  icon: Bell,            label: "Reminders" },
+  { id: "billing",    icon: CreditCard,      label: "Billing" },
   { id: "db-admin",   icon: Database,        label: "Database" },
 ];
 

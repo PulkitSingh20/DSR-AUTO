@@ -1,8 +1,32 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { cn } from "@/src/lib/utils";
 import { MoreVertical, Filter, X, Check, ArrowUpRight, ChevronRight } from "lucide-react";
 import { useSmoothDrag } from "@/src/hooks/useDrag";
+import { api } from "@/src/services/api";
+
+const STAGE_TO_COLUMN: Record<string, string> = {
+  inquiry_received: "Inquiry Received",
+  quotation_sent: "Quotation Sent",
+  shipping_line_selected: "Shipping Line Selected",
+  booking_requested: "Booking Requested",
+  booking_confirmed: "Booking Confirmed",
+  kyc_pending: "KYC Pending",
+  job_opened: "Job Opened",
+  si_vgm_cutoff_shared: "SI/VGM Cutoff Shared",
+  container_pickup_pending: "Container Pickup Pending",
+  si_submitted: "SI Submitted",
+  notify_party_pending: "Notify Party Pending",
+  draft_bl_received: "Draft BL Received",
+  draft_bl_approved: "Draft BL Approved",
+  bl_approved_portal: "BL Approved Portal",
+  vessel_sailed: "Vessel Sailed",
+  liner_invoice_received: "Liner Invoice Received",
+  billing_requested: "Billing Requested",
+  invoice_sent_to_customer: "Invoice Sent to Customer",
+  payment_details_shared: "Payment Details Shared",
+  shipment_closed: "Shipment Closed",
+};
 
 interface PipelineCardProps {
   key?: React.Key;
@@ -63,98 +87,6 @@ const newUserColumns = [
   "Shipment Closed",
 ];
 
-// ─── Mock Data — Existing Customers ──────────────────────────────────────────
-const mockOldUserShipments: Record<string, any[]> = {
-  "Inquiry Received": [
-    { shipper: "Global Tech Indus.", route: "MUM ➔ ROT", line: "CMA CGM", status: "New", color: "bg-[#1A2B4C]" },
-  ],
-  "Quotation Sent": [
-    { shipper: "Aero Dynamics", route: "SHA ➔ LAX", line: "Hapag-Lloyd", status: "Sent", color: "bg-blue-400" },
-  ],
-  "Shipping Line Selected": [
-    { shipper: "Pacific Trade Co.", route: "SIN ➔ HAM", line: "Maersk", status: "Selected", color: "bg-indigo-400" },
-  ],
-  "Booking Requested": [
-    { shipper: "AutoParts Global", route: "DEL ➔ FEL", line: "MSC", status: "Requested", color: "bg-amber-400" },
-  ],
-  "Booking Confirmed": [
-    { shipper: "Lithium Global", route: "HKG ➔ HAM", line: "CMA CGM", status: "Confirmed", color: "bg-emerald-500" },
-  ],
-  "Job Opened": [
-    { shipper: "Matrix Corp", route: "BOM ➔ JEB", line: "ONE", status: "JOB-25-00012", color: "bg-blue-500" },
-  ],
-  "SI/VGM Cutoff Shared": [
-    { shipper: "Global Importers", route: "MAA ➔ SIN", line: "ONE", status: "Cutoff: 18 May", color: "bg-amber-400" },
-  ],
-  "Container Pickup Pending": [
-    { shipper: "Stellar Exports", route: "DEL ➔ LHR", line: "Hapag-Lloyd", status: "Awaiting", color: "bg-orange-400" },
-  ],
-  "SI Submitted": [
-    { shipper: "Oceanic Ltd", route: "DXB ➔ ANT", line: "CMA CGM", status: "Submitted", color: "bg-blue-500" },
-  ],
-  "Notify Party Pending": [],
-  "Draft BL Received": [
-    { shipper: "Euro Traders", route: "MUM ➔ LHR", line: "Maersk", status: "Review Needed", color: "bg-indigo-400" },
-  ],
-  "Draft BL Approved": [],
-  "BL Approved Portal": [
-    { shipper: "Asia Connect", route: "HKG ➔ SYD", line: "COSCO", status: "Approved", color: "bg-emerald-600" },
-  ],
-  "Vessel Sailed": [
-    { shipper: "TradeWind Corp", route: "SHA ➔ RTM", line: "CMA CGM", status: "At Sea", color: "bg-cyan-500" },
-  ],
-  "Liner Invoice Received": [],
-  "Billing Requested": [
-    { shipper: "Apex Industries", route: "BOM ➔ NYC", line: "Maersk", status: "Pending", color: "bg-amber-500" },
-  ],
-  "Invoice Sent to Customer": [],
-  "Payment Details Shared": [
-    { shipper: "NovaTech Ltd", route: "SIN ➔ FRA", line: "MSC", status: "₹4.2L Due", color: "bg-orange-500" },
-  ],
-  "Shipment Closed": [
-    { shipper: "Solaris Corp", route: "SZE ➔ MEL", line: "Maersk", status: "Finalized", color: "bg-emerald-700" },
-  ],
-};
-
-// ─── Mock Data — New Customers ───────────────────────────────────────────────
-const mockNewUserShipments: Record<string, any[]> = {
-  "Inquiry Received": [
-    { shipper: "TechFlow Ltd.", route: "BKK ➔ SGP", line: "Maersk", status: "New", color: "bg-[#1A2B4C]" },
-    { shipper: "EcoShip Co.", route: "HKG ➔ LAX", line: "CMA CGM", status: "New", color: "bg-[#1A2B4C]" },
-  ],
-  "Quotation Sent": [
-    { shipper: "Precision Parts", route: "SIN ➔ NYC", line: "Hapag-Lloyd", status: "Sent", color: "bg-blue-400" },
-  ],
-  "Shipping Line Selected": [],
-  "Booking Requested": [
-    { shipper: "Nova Materials", route: "MAA ➔ DXB", line: "ONE", status: "Requested", color: "bg-amber-400" },
-  ],
-  "Booking Confirmed": [
-    { shipper: "Smart Trade", route: "SHA ➔ FRA", line: "Maersk", status: "Confirmed", color: "bg-emerald-500" },
-  ],
-  "KYC Pending": [
-    { shipper: "Innovation Hub", route: "DEL ➔ DXB", line: "MSC", status: "Action Required", color: "bg-red-500" },
-    { shipper: "Global Ventures", route: "CHI ➔ LAX", line: "ONE", status: "Docs Pending", color: "bg-amber-500" },
-  ],
-  "Job Opened": [
-    { shipper: "Tech Logistics", route: "BOM ➔ DXB", line: "MSC", status: "JOB-25-00015", color: "bg-emerald-400" },
-  ],
-  "SI/VGM Cutoff Shared": [],
-  "Container Pickup Pending": [],
-  "SI Submitted": [],
-  "Notify Party Pending": [],
-  "Draft BL Received": [],
-  "Draft BL Approved": [],
-  "BL Approved Portal": [],
-  "Vessel Sailed": [],
-  "Liner Invoice Received": [],
-  "Billing Requested": [],
-  "Invoice Sent to Customer": [],
-  "Payment Details Shared": [],
-  "Shipment Closed": [],
-};
-
-
 const LINE_LOGOS: Record<string, string> = {
   "CMA CGM": "https://upload.wikimedia.org/wikipedia/en/thumb/0/0e/CMA_CGM_logo.svg/1200px-CMA_CGM_logo.svg.png",
   "Maersk": "https://upload.wikimedia.org/wikipedia/commons/thumb/e/e6/Maersk_Group_Logo.svg/1200px-Maersk_Group_Logo.svg.png",
@@ -165,6 +97,10 @@ const LINE_LOGOS: Record<string, string> = {
 };
 
 export function ShipmentPipeline({ onShipmentClick }: { onShipmentClick?: (id: string, isNewCustomer?: boolean) => void }) {
+  const [shipments, setShipments] = useState<any[]>([]);
+  const [customers, setCustomers] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
   const [selectedShippers, setSelectedShippers] = useState<string[]>([]);
   const [selectedRoutes, setSelectedRoutes] = useState<string[]>([]);
   const [selectedStatuses, setSelectedStatuses] = useState<string[]>([]);
@@ -173,13 +109,96 @@ export function ShipmentPipeline({ onShipmentClick }: { onShipmentClick?: (id: s
   const { containerRef: oldPipelineRef } = useSmoothDrag({ friction: 0.90 });
   const { containerRef: newPipelineRef } = useSmoothDrag({ friction: 0.90 });
 
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    Promise.all([api.shipments.list(), api.customers.list()])
+      .then(([shipmentsRes, customersRes]: any) => {
+        if (!active) return;
+        if (shipmentsRes && shipmentsRes.shipments) {
+          setShipments(shipmentsRes.shipments);
+        }
+        if (customersRes && customersRes.customers) {
+          setCustomers(customersRes.customers);
+        }
+        setLoading(false);
+      })
+      .catch((err) => {
+        console.error("Failed to load pipeline data:", err);
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const customerMap = useMemo(() => {
+    const m = new Map<string, any>();
+    customers.forEach(c => m.set(c._id, c));
+    return m;
+  }, [customers]);
+
+  const { oldUserShipments, newUserShipments } = useMemo(() => {
+    const oldList: any[] = [];
+    const newList: any[] = [];
+
+    shipments.forEach((s, idx) => {
+      const cust = customerMap.get(s.customer_id);
+      const isNew = cust?.customer_tag === "NEW_CUSTOMER" || s.status === "kyc_pending";
+      
+      const col = STAGE_TO_COLUMN[s.status] || "Inquiry Received";
+      
+      const item = {
+        _id: s._id,
+        shipper: s.shipper || "ZIPAWORLD",
+        route: `${s.origin || "MUM"} ➔ ${s.destination || "ROT"}`,
+        line: s.carrier || "TBD",
+        status: col,
+        color: s.status === "kyc_pending" ? "bg-red-500" :
+               s.status === "shipment_closed" ? "bg-emerald-600" :
+               s.status === "in_transit" ? "bg-blue-500" : "bg-indigo-400",
+        isNewCustomer: isNew
+      };
+
+      if (isNew) {
+        newList.push(item);
+      } else {
+        oldList.push(item);
+      }
+    });
+
+    const oldGrouped: Record<string, any[]> = {};
+    const newGrouped: Record<string, any[]> = {};
+
+    oldUserColumns.forEach(col => { oldGrouped[col] = []; });
+    newUserColumns.forEach(col => { newGrouped[col] = []; });
+
+    oldList.forEach(item => {
+      if (oldGrouped[item.status]) {
+        oldGrouped[item.status].push(item);
+      } else {
+        oldGrouped["Inquiry Received"].push(item);
+      }
+    });
+
+    newList.forEach(item => {
+      if (newGrouped[item.status]) {
+        newGrouped[item.status].push(item);
+      } else {
+        newGrouped["Inquiry Received"].push(item);
+      }
+    });
+
+    return { oldUserShipments: oldGrouped, newUserShipments: newGrouped };
+  }, [shipments, customerMap]);
+
   // Extract unique values for filters from both pipelines
   const filterOptions = useMemo(() => {
     const shippers = new Set<string>();
     const routes = new Set<string>();
     const statuses = new Set<string>();
 
-    [...Object.values(mockOldUserShipments).flat(), ...Object.values(mockNewUserShipments).flat()].forEach(s => {
+    [...Object.values(oldUserShipments).flat(), ...Object.values(newUserShipments).flat()].forEach(s => {
       shippers.add(s.shipper);
       routes.add(s.route);
       statuses.add(s.status);
@@ -190,7 +209,7 @@ export function ShipmentPipeline({ onShipmentClick }: { onShipmentClick?: (id: s
       routes: Array.from(routes),
       statuses: Array.from(statuses)
     };
-  }, []);
+  }, [oldUserShipments, newUserShipments]);
 
   const toggleFilter = (type: "shipper" | "route" | "status", value: string) => {
     const setters = {
@@ -213,7 +232,7 @@ export function ShipmentPipeline({ onShipmentClick }: { onShipmentClick?: (id: s
   const filteredOldUserShipments = useMemo(() => {
     const result: Record<string, any[]> = {};
     oldUserColumns.forEach(col => {
-      const items = mockOldUserShipments[col] || [];
+      const items = oldUserShipments[col] || [];
       result[col] = items.filter(s => {
         const shipperMatch = selectedShippers.length === 0 || selectedShippers.includes(s.shipper);
         const routeMatch = selectedRoutes.length === 0 || selectedRoutes.includes(s.route);
@@ -222,12 +241,12 @@ export function ShipmentPipeline({ onShipmentClick }: { onShipmentClick?: (id: s
       });
     });
     return result;
-  }, [selectedShippers, selectedRoutes, selectedStatuses]);
+  }, [oldUserShipments, selectedShippers, selectedRoutes, selectedStatuses]);
 
   const filteredNewUserShipments = useMemo(() => {
     const result: Record<string, any[]> = {};
     newUserColumns.forEach(col => {
-      const items = mockNewUserShipments[col] || [];
+      const items = newUserShipments[col] || [];
       result[col] = items.filter(s => {
         const shipperMatch = selectedShippers.length === 0 || selectedShippers.includes(s.shipper);
         const routeMatch = selectedRoutes.length === 0 || selectedRoutes.includes(s.route);
@@ -236,11 +255,11 @@ export function ShipmentPipeline({ onShipmentClick }: { onShipmentClick?: (id: s
       });
     });
     return result;
-  }, [selectedShippers, selectedRoutes, selectedStatuses]);
+  }, [newUserShipments, selectedShippers, selectedRoutes, selectedStatuses]);
 
   const activeFilterCount = selectedShippers.length + selectedRoutes.length + selectedStatuses.length;
-  const oldUserTotal = Object.values(mockOldUserShipments).flat().length;
-  const newUserTotal = Object.values(mockNewUserShipments).flat().length;
+  const oldUserTotal = Object.values(oldUserShipments).flat().length;
+  const newUserTotal = Object.values(newUserShipments).flat().length;
 
   return (
     <section className="space-y-6">
@@ -424,7 +443,7 @@ export function ShipmentPipeline({ onShipmentClick }: { onShipmentClick?: (id: s
                              status={shipment.status}
                              statusColor={shipment.color}
                              isNew={false}
-                             onClick={() => onShipmentClick?.(`EID-${shipment.shipper.substring(0, 3).toUpperCase()}-${idx}`, false)}
+                             onClick={() => onShipmentClick?.(shipment._id, false)}
                           />
                         </motion.div>
                       ))}
@@ -481,7 +500,7 @@ export function ShipmentPipeline({ onShipmentClick }: { onShipmentClick?: (id: s
                              status={shipment.status}
                              statusColor={shipment.color}
                              isNew={true}
-                             onClick={() => onShipmentClick?.(`EID-${shipment.shipper.substring(0, 3).toUpperCase()}-${idx}`, true)}
+                             onClick={() => onShipmentClick?.(shipment._id, true)}
                           />
                         </motion.div>
                       ))}

@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { 
   Banknote, 
   CreditCard, 
@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { motion, AnimatePresence } from "motion/react";
+import { api } from "@/src/services/api";
 
 interface Invoice {
   id: string;
@@ -35,23 +36,46 @@ interface Invoice {
   hasReminder?: boolean;
 }
 
-const INITIAL_INVOICES: Invoice[] = [
-  { id: "INV-8821", shipmentId: "EID-0943", entity: "Maersk Line", type: "Liner", amount: "4,200", currency: "USD", status: "Payment Received", dueDate: "24 Apr", hasReminder: false },
-  { id: "INV-4401", shipmentId: "EID-4401", entity: "Global Tech", type: "Customer", amount: "6,850", currency: "USD", status: "Invoice Generated", dueDate: "02 May", hasReminder: true },
-  { id: "INV-9912", shipmentId: "EID-9912", entity: "CMA CGM", type: "Liner", amount: "3,100", currency: "USD", status: "Sent to Accounts", dueDate: "20 Apr", hasReminder: true },
-  { id: "INV-1022", shipmentId: "EID-1022", entity: "Aero Dynamics", type: "Customer", amount: "12,400", currency: "USD", status: "Invoice Pending", dueDate: "15 May", hasReminder: false },
-];
-
 export function BillingManagement() {
-  const [invoices, setInvoices] = useState<Invoice[]>(INITIAL_INVOICES);
+  const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<"All" | "Pending" | "Generated" | "Received">("All");
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [newInvoice, setNewInvoice] = useState({
     id: "", shipmentId: "", entity: "", type: "Customer" as Invoice["type"],
-    amount: "", currency: "USD", status: "Invoice Pending" as Invoice["status"], dueDate: ""
+    amount: "", currency: "INR", status: "Invoice Pending" as Invoice["status"], dueDate: ""
   });
+
+  const fetchLedger = () => {
+    setLoading(true);
+    api.invoices.list()
+      .then((res: any) => {
+        const rawInvs = res?.invoices || [];
+        const mapped: Invoice[] = rawInvs.map((inv: any) => ({
+          id: inv._id,
+          shipmentId: inv.shipment_id || "N/A",
+          entity: inv.customer_id ? inv.customer_id.replace("CUST_", "").replace(/_/g, " ") : "Liner Line",
+          type: (inv.type === "customer" ? "Customer" : "Liner") as Invoice["type"],
+          amount: Number(inv.amount).toLocaleString(),
+          currency: inv.currency || "INR",
+          status: (inv.status === "paid" ? "Payment Received" : inv.status === "sent" ? "Invoice Generated" : "Invoice Pending") as Invoice["status"],
+          dueDate: inv.due_date || "N/A",
+          hasReminder: inv.has_reminder === 1
+        }));
+        setInvoices(mapped);
+        setLoading(false);
+      })
+      .catch((err) => {
+        console.error("Failed to fetch invoices:", err);
+        setLoading(false);
+      });
+  };
+
+  useEffect(() => {
+    fetchLedger();
+  }, []);
 
   const filteredInvoices = invoices.filter(inv => {
     const matchesTab =
@@ -69,22 +93,39 @@ export function BillingManagement() {
 
   const handleCreateInvoice = () => {
     if (!newInvoice.id || !newInvoice.entity || !newInvoice.amount) return;
-    setInvoices(prev => [...prev, { ...newInvoice, hasReminder: false }]);
-    setNewInvoice({ id: "", shipmentId: "", entity: "", type: "Customer", amount: "", currency: "USD", status: "Invoice Pending", dueDate: "" });
-    setShowCreateModal(false);
+    
+    const rawAmount = parseFloat(newInvoice.amount.replace(/,/g, "")) || 0;
+    const data = {
+      id: newInvoice.id,
+      shipment_id: newInvoice.shipmentId,
+      customer_id: "CUST_" + newInvoice.entity.replace(/[^A-Z0-9]/ig, "_").toUpperCase(),
+      type: newInvoice.type.toLowerCase(),
+      amount: rawAmount,
+      currency: newInvoice.currency,
+      status: newInvoice.status === "Payment Received" ? "paid" : newInvoice.status === "Invoice Generated" ? "sent" : "pending",
+      due_date: newInvoice.dueDate || new Date().toISOString().split("T")[0],
+      has_reminder: 0
+    };
+
+    api.invoices.create(data)
+      .then(() => {
+        setNewInvoice({ id: "", shipmentId: "", entity: "", type: "Customer", amount: "", currency: "INR", status: "Invoice Pending", dueDate: "" });
+        setShowCreateModal(false);
+        fetchLedger();
+      })
+      .catch(err => {
+        console.error("Failed to create invoice:", err);
+        alert("Error creating invoice: " + err.message);
+      });
   };
 
   const isOverdue = (dateStr: string, status: Invoice["status"]) => {
-    if (status === "Payment Received") return false;
+    if (status === "Payment Received" || dateStr === "N/A") return false;
     
-    const months: Record<string, number> = {
-      Jan: 0, Feb: 1, Mar: 2, Apr: 3, May: 4, Jun: 5,
-      Jul: 6, Aug: 7, Sep: 8, Oct: 9, Nov: 10, Dec: 11
-    };
-    
-    const [day, monthStr] = dateStr.split(" ");
-    const dueDate = new Date(2026, months[monthStr], parseInt(day));
-    const today = new Date(2026, 3, 28); // Today's date based on metadata
+    const parts = dateStr.split("-");
+    if (parts.length < 3) return false;
+    const dueDate = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+    const today = new Date(2026, 5, 16); // June 16, 2026
     
     return dueDate < today;
   };
@@ -97,9 +138,16 @@ export function BillingManagement() {
   });
 
   const toggleReminder = (id: string) => {
-    setInvoices(prev => prev.map(inv => 
-      inv.id === id ? { ...inv, hasReminder: !inv.hasReminder } : inv
-    ));
+    const targetInv = invoices.find(inv => inv.id === id);
+    if (!targetInv) return;
+
+    api.invoices.update(id, { has_reminder: targetInv.hasReminder ? 0 : 1 })
+      .then(() => {
+        setInvoices(prev => prev.map(inv => 
+          inv.id === id ? { ...inv, hasReminder: !inv.hasReminder } : inv
+        ));
+      })
+      .catch(err => console.error("Failed to toggle reminder:", err));
   };
 
   const getStatusColor = (status: Invoice["status"]) => {
@@ -111,6 +159,14 @@ export function BillingManagement() {
       default: return "bg-slate-50 text-slate-600 border-slate-100";
     }
   };
+
+  const totalReceivables = invoices
+    .filter(inv => inv.type === "Customer")
+    .reduce((sum, inv) => sum + (parseFloat(inv.amount.replace(/,/g, "")) || 0), 0);
+
+  const totalPayables = invoices
+    .filter(inv => inv.type === "Liner")
+    .reduce((sum, inv) => sum + (parseFloat(inv.amount.replace(/,/g, "")) || 0), 0);
 
   return (
     <div className="p-10 max-w-[1600px] mx-auto space-y-12 pb-24 transition-colors">
@@ -190,7 +246,7 @@ export function BillingManagement() {
                    onClick={() => setReminderConfig(prev => ({ ...prev, enabled: !prev.enabled }))}
                    className={cn(
                      "px-6 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all",
-                     reminderConfig.enabled ? "bg-emerald-500 text-white" : "bg-white/10 text-slate-400"
+                     reminderConfig.enabled ? "bg-emerald-50 text-white" : "bg-white/10 text-slate-400"
                    )}
                  >
                    {reminderConfig.enabled ? "Enabled" : "Disabled"}
@@ -269,14 +325,14 @@ export function BillingManagement() {
         <MetricBox 
           icon={<ArrowUpRight className="text-emerald-500" />} 
           label="Total Receivables" 
-          value="$142,400" 
+          value={loading ? "..." : "₹" + totalReceivables.toLocaleString()} 
           trend="+12% vs last month"
           trendColor="text-emerald-500"
         />
         <MetricBox 
           icon={<TrendingDown className="text-amber-500" />} 
           label="Liner Payables" 
-          value="$89,200" 
+          value={loading ? "..." : "₹" + totalPayables.toLocaleString()} 
           trend="4 invoices due today"
           trendColor="text-amber-500"
         />
@@ -366,101 +422,111 @@ export function BillingManagement() {
         </div>
 
         <div className="overflow-x-auto">
-          <table className="w-full text-left">
-            <thead className="bg-slate-50/50">
-              <tr>
-                <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest">ID / Ref</th>
-                <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest">Shipment</th>
-                <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest">Entity</th>
-                <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest">Type</th>
-                <th className="px-8 py-5 text-[10px) font-black text-slate-400 uppercase tracking-widest">Amount</th>
-                <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest">Status</th>
-                <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Auto-Remind</th>
-                <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest">Due Date</th>
-                <th className="px-8 py-5"></th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-50">
-              {filteredInvoices.map((inv) => {
-                const overdue = isOverdue(inv.dueDate, inv.status);
-                return (
-                  <tr key={inv.id} className={cn(
-                    "hover:bg-slate-50/50 transition-colors",
-                    overdue && "bg-red-50/30"
-                  )}>
-                    <td className="px-8 py-6 font-extrabold text-[#1A2B4C] text-sm">
-                      <div className="flex flex-col gap-1">
-                        {inv.id}
-                        {overdue && (
-                          <span className="flex items-center gap-1 text-[8px] font-black text-red-500 uppercase tracking-tighter bg-red-100/50 px-1.5 py-0.5 rounded w-fit">
-                            <AlertCircle size={8} /> Late
-                          </span>
-                        )}
-                      </div>
-                    </td>
-                    <td className="px-8 py-6 text-sm font-bold text-primary">{inv.shipmentId}</td>
-                    <td className="px-8 py-6">
-                      <div className="flex items-center gap-2">
-                         <div className="w-2 h-2 rounded-full bg-[#1A2B4C]/20" />
-                         <span className="text-sm font-bold text-slate-600">{inv.entity}</span>
-                      </div>
-                    </td>
-                    <td className="px-8 py-6">
-                      <span className={cn(
-                        "px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest",
-                        inv.type === "Liner" ? "bg-slate-100 text-slate-600" : "bg-purple-50 text-purple-600"
-                      )}>
-                        {inv.type}
-                      </span>
-                    </td>
-                    <td className="px-8 py-6">
-                      <div className="flex items-center gap-1">
-                         <span className="text-xs font-bold text-slate-400">{inv.currency}</span>
-                         <span className="text-sm font-black text-[#1A2B4C]">{inv.amount}</span>
-                      </div>
-                    </td>
-                    <td className="px-8 py-6">
-                      <div className="flex flex-col gap-2">
-                        <div className={cn(
-                          "px-4 py-1.5 rounded-xl border text-[9px] font-black uppercase tracking-widest inline-flex items-center gap-2",
-                          getStatusColor(inv.status),
-                          overdue && "border-red-200"
-                        )}>
-                          {inv.status === "Payment Received" ? <CheckCircle2 size={12} /> : 
-                          inv.status === "Invoice Pending" ? <AlertCircle size={12} /> : <Clock size={12} />}
-                          {inv.status}
+          {loading ? (
+            <div className="py-20 text-center text-xs font-mono text-slate-400 uppercase tracking-widest">
+              Syncing Financial Manifest...
+            </div>
+          ) : filteredInvoices.length === 0 ? (
+            <div className="py-20 text-center text-xs font-mono text-slate-400 uppercase tracking-widest">
+              No Ledger Records Found
+            </div>
+          ) : (
+            <table className="w-full text-left">
+              <thead className="bg-slate-50/50">
+                <tr>
+                  <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest">ID / Ref</th>
+                  <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest">Shipment</th>
+                  <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest">Entity</th>
+                  <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest">Type</th>
+                  <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest">Amount</th>
+                  <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest">Status</th>
+                  <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Auto-Remind</th>
+                  <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest">Due Date</th>
+                  <th className="px-8 py-5"></th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-50">
+                {filteredInvoices.map((inv) => {
+                  const overdue = isOverdue(inv.dueDate, inv.status);
+                  return (
+                    <tr key={inv.id} className={cn(
+                      "hover:bg-slate-50/50 transition-colors",
+                      overdue && "bg-red-50/30"
+                    )}>
+                      <td className="px-8 py-6 font-extrabold text-[#1A2B4C] text-sm">
+                        <div className="flex flex-col gap-1">
+                          {inv.id}
+                          {overdue && (
+                            <span className="flex items-center gap-1 text-[8px] font-black text-red-500 uppercase tracking-tighter bg-red-100/50 px-1.5 py-0.5 rounded w-fit">
+                              <AlertCircle size={8} /> Late
+                            </span>
+                          )}
                         </div>
-                      </div>
-                    </td>
-                    <td className="px-8 py-6">
-                       <div className="flex justify-center">
-                          <button 
-                            onClick={() => toggleReminder(inv.id)}
-                            className={cn(
-                              "p-2.5 rounded-xl transition-all border",
-                              inv.hasReminder ? "bg-amber-50 border-amber-200 text-amber-500 shadow-sm" : "bg-slate-50 border-slate-100 text-slate-300 hover:text-slate-500"
-                            )}
-                          >
-                            <Bell size={16} />
-                          </button>
-                       </div>
-                    </td>
-                    <td className="px-8 py-6">
-                      <div className={cn(
-                        "text-xs font-bold",
-                        overdue ? "text-red-500" : "text-slate-400"
-                      )}>
-                        {inv.dueDate}
-                      </div>
-                    </td>
-                    <td className="px-8 py-6 text-right">
-                      <button className="text-slate-300 hover:text-[#1A2B4C]"><MoreVertical size={16} /></button>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                      </td>
+                      <td className="px-8 py-6 text-sm font-bold text-primary">{inv.shipmentId}</td>
+                      <td className="px-8 py-6">
+                        <div className="flex items-center gap-2">
+                           <div className="w-2 h-2 rounded-full bg-[#1A2B4C]/20" />
+                           <span className="text-sm font-bold text-slate-600">{inv.entity}</span>
+                        </div>
+                      </td>
+                      <td className="px-8 py-6">
+                        <span className={cn(
+                          "px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest",
+                          inv.type === "Liner" ? "bg-slate-100 text-slate-600" : "bg-purple-50 text-purple-600"
+                        )}>
+                          {inv.type}
+                        </span>
+                      </td>
+                      <td className="px-8 py-6">
+                        <div className="flex items-center gap-1">
+                           <span className="text-xs font-bold text-slate-400">{inv.currency}</span>
+                           <span className="text-sm font-black text-[#1A2B4C]">{inv.amount}</span>
+                        </div>
+                      </td>
+                      <td className="px-8 py-6">
+                        <div className="flex flex-col gap-2">
+                          <div className={cn(
+                            "px-4 py-1.5 rounded-xl border text-[9px] font-black uppercase tracking-widest inline-flex items-center gap-2",
+                            getStatusColor(inv.status),
+                            overdue && "border-red-200"
+                          )}>
+                            {inv.status === "Payment Received" ? <CheckCircle2 size={12} /> : 
+                            inv.status === "Invoice Pending" ? <AlertCircle size={12} /> : <Clock size={12} />}
+                            {inv.status}
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-8 py-6">
+                         <div className="flex justify-center">
+                            <button 
+                              onClick={() => toggleReminder(inv.id)}
+                              className={cn(
+                                "p-2.5 rounded-xl transition-all border",
+                                inv.hasReminder ? "bg-amber-50 border-amber-200 text-amber-500 shadow-sm" : "bg-slate-50 border-slate-100 text-slate-300 hover:text-slate-500"
+                              )}
+                            >
+                              <Bell size={16} />
+                            </button>
+                         </div>
+                      </td>
+                      <td className="px-8 py-6">
+                        <div className={cn(
+                          "text-xs font-bold",
+                          overdue ? "text-red-500" : "text-slate-400"
+                        )}>
+                          {inv.dueDate}
+                        </div>
+                      </td>
+                      <td className="px-8 py-6 text-right">
+                        <button className="text-slate-300 hover:text-[#1A2B4C]"><MoreVertical size={16} /></button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
         </div>
       </div>
 

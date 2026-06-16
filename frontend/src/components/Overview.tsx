@@ -2,8 +2,35 @@ import { motion } from "motion/react";
 import { TrendingUp, Check } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { ThreeDNetwork } from "./ThreeDNetwork";
+import { useState, useEffect } from "react";
+import { api } from "@/src/services/api";
 
 export function Overview() {
+  const [stats, setStats] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let active = true;
+    api.shipments.stats()
+      .then((data: any) => {
+        if (!active) return;
+        setStats(data);
+        setLoading(false);
+      })
+      .catch((err) => {
+        console.error("Failed to fetch shipment stats for overview:", err);
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  // Compute active nodes (total minus closed shipments)
+  const total = stats?.total || 0;
+  const closedCount = stats?.byStatus?.find((s: any) => s.status === "shipment_closed")?.count || 0;
+  const activeNodesCount = total - closedCount;
+
   return (
     <section className="relative overflow-hidden bg-[#0A1121] rounded-[32px] p-12 text-white min-h-[340px] flex flex-col justify-between shadow-technical border border-white/5">
       {/* Background Repeating Text - Rolling Animation */}
@@ -55,7 +82,9 @@ export function Overview() {
       <div className="relative z-20 flex flex-wrap gap-12 mt-8">
         <div>
           <span className="text-[10px] font-mono uppercase tracking-[0.2em] text-slate-300 font-bold block mb-2">ACTIVE NODES</span>
-          <span className="text-5xl font-display font-extrabold text-white">1,284</span>
+          <span className="text-5xl font-display font-extrabold text-white">
+            {loading ? "..." : activeNodesCount.toLocaleString()}
+          </span>
         </div>
         <div>
           <span className="text-[10px] font-mono uppercase tracking-[0.2em] text-slate-300 font-bold block mb-2">EFFICIENCY RATING</span>

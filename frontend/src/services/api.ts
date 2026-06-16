@@ -90,5 +90,26 @@ export const api = {
     createKey: (data: any) => request<any>("/auth/keys", { method: "POST", body: JSON.stringify(data) }),
     revokeKey: (id: string) => request<any>(`/auth/keys/${id}`, { method: "DELETE" }),
   },
-  
+
+  // Customers
+  customers: {
+    list: (search?: string) => request<any>(`/customers${search ? `?search=${encodeURIComponent(search)}` : ""}`),
+    get: (id: string) => request<any>(`/customers/${id}`),
+    create: (data: any) => request<any>("/customers", { method: "POST", body: JSON.stringify(data) }),
+    update: (id: string, data: any) => request<any>(`/customers/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
+    delete: (id: string) => request<any>(`/customers/${id}`, { method: "DELETE" }),
+  },
+
+  // Invoices
+  invoices: {
+    list: (params?: Record<string, string>) => {
+      const q = params ? "?" + new URLSearchParams(params).toString() : "";
+      return request<any>(`/invoices${q}`);
+    },
+    get: (id: string) => request<any>(`/invoices/${id}`),
+    getByShipment: (shipmentId: string) => request<any>(`/invoices/shipment/${shipmentId}`),
+    create: (data: any) => request<any>("/invoices", { method: "POST", body: JSON.stringify(data) }),
+    update: (id: string, data: any) => request<any>(`/invoices/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
+    delete: (id: string) => request<any>(`/invoices/${id}`, { method: "DELETE" }),
+  }
 };

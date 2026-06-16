@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { 
   Users, 
   Search, 
@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 import { motion, AnimatePresence } from "motion/react";
+import { api } from "@/src/services/api";
 
 interface Shipment {
   id: string;
@@ -43,37 +44,6 @@ interface Customer {
 const SHIPPING_LINES = ["CMA CGM", "Maersk", "Hapag-Lloyd", "MSC", "COSCO", "ONE", "Evergreen", "Yang Ming"];
 const COUNTRIES = ["India", "China", "USA", "Germany", "Japan", "Singapore", "UAE", "UK", "France", "South Korea", "Netherlands", "Australia"];
 
-const INITIAL_CUSTOMERS: Customer[] = [
-  { 
-    id: "C1", name: "Global Tech Industries", kycStatus: "Verified", totalShipments: 142, preferredLine: "CMA CGM", lastActive: "2 hours ago", country: "India", contactEmail: "shipping@globaltech.com",
-    shipments: [
-      { id: "SHP-GT-0942", route: "MUM ➔ ROT", status: "In Transit", date: "Oct 24" },
-      { id: "SHP-GT-0941", route: "DEL ➔ DXB", status: "Delivered", date: "Sep 15" }
-    ]
-  },
-  { 
-    id: "C2", name: "Aero Dynamics Co.", kycStatus: "Verified", totalShipments: 89, preferredLine: "Maersk", lastActive: "1 day ago", country: "Germany", contactEmail: "logistics@aero.de",
-    shipments: [
-      { id: "SHP-AD-4412", route: "HAM ➔ JFK", status: "Customs Hold", date: "Oct 22" },
-      { id: "SHP-AD-4411", route: "FRA ➔ SIN", status: "Delivered", date: "Oct 10" },
-      { id: "SHP-AD-4410", route: "MUC ➔ DXB", status: "Delivered", date: "Sep 28" }
-    ]
-  },
-  { 
-    id: "C3", name: "Lithium Global", kycStatus: "Pending", totalShipments: 12, preferredLine: "Hapag-Lloyd", lastActive: "3 days ago", country: "China", contactEmail: "ops@lithium.cn",
-    shipments: [
-      { id: "SHP-LG-0012", route: "SHA ➔ LAX", status: "Booking Confirmed", date: "Oct 25" }
-    ]
-  },
-  { 
-    id: "C4", name: "Precision Parts Ltd", kycStatus: "Expired", totalShipments: 45, preferredLine: "MSC", lastActive: "1 week ago", country: "USA", contactEmail: "vane@precision.com",
-    shipments: [
-      { id: "SHP-PP-0845", route: "NYC ➔ LHR", status: "Delivered", date: "Aug 12" },
-      { id: "SHP-PP-0844", route: "LAX ➔ SYD", status: "Delivered", date: "Jul 05" }
-    ]
-  },
-];
-
 const EMPTY_FORM = { name: "", country: "", contactEmail: "", preferredLine: "", kycStatus: "Pending" as Customer["kycStatus"] };
 
 export function CustomerManagement({ 
@@ -83,7 +53,8 @@ export function CustomerManagement({
   onAutofill: (customer: Customer) => void;
   onShipmentClick?: (id: string, isNewCustomer?: boolean) => void;
 }) {
-  const [customers, setCustomers] = useState<Customer[]>(INITIAL_CUSTOMERS);
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [showModal, setShowModal] = useState(false);
   const [expandedCustomerId, setExpandedCustomerId] = useState<string | null>(null);
@@ -91,6 +62,49 @@ export function CustomerManagement({
   const [form, setForm] = useState(EMPTY_FORM);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [success, setSuccess] = useState(false);
+
+  const fetchRegistry = () => {
+    setLoading(true);
+    Promise.all([api.customers.list(), api.shipments.list()])
+      .then(([custRes, shipRes]: any) => {
+        const rawCusts = custRes?.customers || [];
+        const rawShips = shipRes?.shipments || [];
+
+        const mapped: Customer[] = rawCusts.map((c: any) => {
+          const relatedShips = rawShips
+            .filter((s: any) => s.customer_id === c._id)
+            .map((s: any) => ({
+              id: s._id,
+              route: `${s.origin} ➔ ${s.destination}`,
+              status: s.status.replace(/_/g, " ").replace(/\b\w/g, (char: string) => char.toUpperCase()),
+              date: s.etd || "N/A"
+            }));
+
+          return {
+            id: c._id,
+            name: c.name,
+            kycStatus: (c.kyc_status === "verified" ? "Verified" : c.kyc_status === "expired" ? "Expired" : "Pending") as Customer["kycStatus"],
+            totalShipments: relatedShips.length,
+            preferredLine: c.preferred_lines?.[0] || "TBD",
+            lastActive: c.updated_at ? "Synced" : "Active",
+            country: c.country || "India",
+            contactEmail: c.email || "ops@zipaworld.com",
+            shipments: relatedShips
+          };
+        });
+
+        setCustomers(mapped);
+        setLoading(false);
+      })
+      .catch(err => {
+        console.error("Failed to load customer registry:", err);
+        setLoading(false);
+      });
+  };
+
+  useEffect(() => {
+    fetchRegistry();
+  }, []);
 
   const filteredCustomers = customers.filter(c =>
     c.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -110,25 +124,31 @@ export function CustomerManagement({
   const handleSubmit = () => {
     const e = validate();
     if (Object.keys(e).length > 0) { setErrors(e); return; }
-    const newCustomer: Customer = {
-      id: `C${customers.length + 1}`,
+
+    const data = {
       name: form.name.trim(),
       country: form.country,
-      contactEmail: form.contactEmail.trim(),
-      preferredLine: form.preferredLine,
-      kycStatus: "Pending",
-      totalShipments: 0,
-      lastActive: "Just now",
-      shipments: [],
+      email: form.contactEmail.trim(),
+      preferred_lines: [form.preferredLine],
+      kyc_status: "pending",
+      customer_tag: "NEW_CUSTOMER"
     };
-    setCustomers(prev => [...prev, newCustomer]);
-    setSuccess(true);
-    setTimeout(() => {
-      setSuccess(false);
-      setShowModal(false);
-      setForm(EMPTY_FORM);
-      setErrors({});
-    }, 1800);
+
+    api.customers.create(data)
+      .then(() => {
+        setSuccess(true);
+        setTimeout(() => {
+          setSuccess(false);
+          setShowModal(false);
+          setForm(EMPTY_FORM);
+          setErrors({});
+          fetchRegistry();
+        }, 1800);
+      })
+      .catch(err => {
+        console.error("Failed to create customer:", err);
+        setErrors({ name: err.message || "Failed to save customer to registry" });
+      });
   };
 
   const handleClose = () => {
@@ -144,7 +164,7 @@ export function CustomerManagement({
       <div className="flex items-center justify-between">
         <div>
           <h3 className="text-xl font-manrope font-extrabold text-[#1A2B4C] mb-1">Shipper Registry</h3>
-          <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Manage {customers.length + 1200} active global partners</p>
+          <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Manage {customers.length} active global partners</p>
         </div>
         <div className="flex items-center gap-4">
           <div className="relative">
@@ -164,19 +184,28 @@ export function CustomerManagement({
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <AnimatePresence mode="popLayout">
-          {filteredCustomers.map((customer) => (
-            <motion.div
-              key={customer.id}
-              layout
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className={cn(
-                "bg-white p-6 rounded-3xl border border-slate-200/60 shadow-[0_8px_30px_rgb(0,0,0,0.02)] hover:shadow-[0_12px_40px_rgb(0,0,0,0.06)] hover:border-slate-300/60 transition-all duration-300 group relative",
-                activeDropdown === customer.id ? "z-30" : "z-10"
-              )}
-            >
+        {loading ? (
+          <div className="col-span-2 py-20 text-center text-xs font-mono text-slate-400 uppercase tracking-widest bg-white border border-slate-200 rounded-3xl">
+            Syncing Partner Registry...
+          </div>
+        ) : filteredCustomers.length === 0 ? (
+          <div className="col-span-2 py-20 text-center text-xs font-mono text-slate-400 uppercase tracking-widest bg-white border border-slate-200 rounded-3xl">
+            No Shippers Found
+          </div>
+        ) : (
+          <AnimatePresence mode="popLayout">
+            {filteredCustomers.map((customer) => (
+              <motion.div
+                key={customer.id}
+                layout
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.95 }}
+                className={cn(
+                  "bg-white p-6 rounded-3xl border border-slate-200/60 shadow-[0_8px_30px_rgb(0,0,0,0.02)] hover:shadow-[0_12px_40px_rgb(0,0,0,0.06)] hover:border-slate-300/60 transition-all duration-300 group relative",
+                  activeDropdown === customer.id ? "z-30" : "z-10"
+                )}
+              >
               <div className="absolute inset-0 overflow-hidden rounded-3xl pointer-events-none">
                 <div className="absolute top-0 right-0 p-6 opacity-[0.03] group-hover:opacity-[0.08] text-slate-400 transition-opacity">
                   <Users size={96} />
@@ -339,6 +368,7 @@ export function CustomerManagement({
             </motion.div>
           ))}
         </AnimatePresence>
+      )}
 
         {/* Register New Shipper card */}
         <button
